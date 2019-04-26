@@ -1,5 +1,5 @@
 [package]
-name = "hw1_dem"
+name = "bell103_demodulator"
 version = "0.1.0"
 authors = ["Luke Petherbridge <luc6@pdx.edu>"]
 edition = "2018"

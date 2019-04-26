@@ -20,6 +20,8 @@ const ANS_SPACE_FREQUENCY: f64 = 2025.0;
 struct Opt {
     #[structopt(parse(from_os_str), help = "The PCM WAV file to be decoded")]
     file: PathBuf,
+    #[structopt(parse(from_os_str), help = "The output file to store the message")]
+    output: Option<PathBuf>,
     #[structopt(
         short = "s",
         long = "sampling_rate",
@@ -91,9 +93,12 @@ fn decode_file(opt: Opt) {
     }
 
     // Print and save our message
-    println!("{}", message);
-    let mut file = std::fs::File::create("MESSAGE.txt").unwrap();
-    file.write_all(message.as_bytes()).unwrap();
+    if let Some(file) = opt.output {
+        let mut file = std::fs::File::create(file).unwrap();
+        file.write_all(message.as_bytes()).unwrap();
+    } else {
+        println!("{}", message);
+    }
 }
 
 #[derive(Debug)]
