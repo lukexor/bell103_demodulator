@@ -6,3 +6,4 @@ edition = "2018"
 
 [dependencies]
 hound = "3.4.0"
+structopt = "0.2"

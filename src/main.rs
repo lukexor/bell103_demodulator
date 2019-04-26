@@ -1,32 +1,70 @@
-#![allow(dead_code, unused_variables)]
-
 use hound;
-use std::env;
 use std::f64::consts::PI;
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Write;
+use std::path::PathBuf;
+use structopt::StructOpt;
 
-const DEFAULT_SAMPLING_RATE: f64 = 48_000.0;
-const DEFAULT_BLOCK_SIZE: usize = 160;
-const MARK_FREQUENCY: f64 = 2225.0;
-const SPACE_FREQUENCY: f64 = 2025.0;
+const ORIG_MARK_FREQUENCY: f64 = 1270.0;
+const ORIG_SPACE_FREQUENCY: f64 = 1070.0;
+const ANS_MARK_FREQUENCY: f64 = 2225.0;
+const ANS_SPACE_FREQUENCY: f64 = 2025.0;
 
-fn main() {
-    let mut args = env::args().skip(1);
-    let input_file = match args.next() {
-        None => usage(),
-        Some(path) => File::open(path).unwrap(),
-    };
-    decode_file(input_file);
+#[derive(StructOpt, Debug)]
+#[structopt(
+    name = "bell103_demodulator",
+    about = "Decodes messages made using the Bell 103 modem protocol using a Goertzel filter",
+    version = "0.1.0",
+    author = "Luke Petherbridge <me@lukeworks.tech>"
+)]
+struct Opt {
+    #[structopt(parse(from_os_str), help = "The PCM WAV file to be decoded")]
+    file: PathBuf,
+    #[structopt(
+        short = "s",
+        long = "sampling_rate",
+        default_value = "48000",
+        help = "Audio sampling rate"
+    )]
+    sampling_rate: f64,
+    #[structopt(
+        short = "l",
+        long = "filter_length",
+        default_value = "160",
+        help = "Goertzel filter length N"
+    )]
+    filter_length: usize,
+    #[structopt(
+        short = "o",
+        long = "origin",
+        help = "Use originating mark/space frequencies (default uses answering frequencies"
+    )]
+    origin: bool,
 }
 
-fn decode_file<F: Read>(file: F) {
-    let mut mark = GoertzelFilter::new(DEFAULT_BLOCK_SIZE, MARK_FREQUENCY, DEFAULT_SAMPLING_RATE);
-    let mut space = GoertzelFilter::new(DEFAULT_BLOCK_SIZE, SPACE_FREQUENCY, DEFAULT_SAMPLING_RATE);
+fn main() {
+    let opt = Opt::from_args();
+    decode_file(opt);
+}
+
+fn decode_file(opt: Opt) {
+    let (mark_frequency, space_frequency) = if opt.origin {
+        (ORIG_MARK_FREQUENCY, ORIG_SPACE_FREQUENCY)
+    } else {
+        (ANS_MARK_FREQUENCY, ANS_SPACE_FREQUENCY)
+    };
+    // Create two filters for mark and space frequencies
+    let mut mark = GoertzelFilter::new(opt.filter_length, mark_frequency, opt.sampling_rate);
+    let mut space = GoertzelFilter::new(opt.filter_length, space_frequency, opt.sampling_rate);
+
+    // Read our sample data
+    let file = File::open(opt.file).unwrap();
     let mut reader = hound::WavReader::new(file).unwrap();
     let samples: Vec<i16> = reader.samples::<i16>().map(Result::unwrap).collect();
-    let mut bits: Vec<u8> = Vec::with_capacity(samples.len() / DEFAULT_BLOCK_SIZE);
-    for chunk in samples.chunks(DEFAULT_BLOCK_SIZE) {
+
+    // Loop in chunks over our sample, applying our filters and building a list of bits
+    let mut bits: Vec<u8> = Vec::with_capacity(samples.len() / opt.filter_length);
+    for chunk in samples.chunks(opt.filter_length) {
         mark.process(chunk);
         space.process(chunk);
         let bit = if mark.get_mag_sq() >= space.get_mag_sq() {
@@ -38,26 +76,24 @@ fn decode_file<F: Read>(file: F) {
         mark.reset();
         space.reset();
     }
+
+    // Loop over chunks of 10 bits to create char bytes for our decoded message
     let mut message = String::new();
     for chunk in bits.chunks(10) {
         if chunk[0] == 0 && chunk[9] == 1 {
             let int = chunk[1..8]
                 .iter()
                 .rev()
-                .fold(0, |acc, &b| (acc << 1) | b as u32);
+                .fold(0, |acc, &b| (acc << 1) | u32::from(b));
             let char = std::char::from_u32(int).unwrap();
             message.push(char);
         }
     }
+
+    // Print and save our message
     println!("{}", message);
     let mut file = std::fs::File::create("MESSAGE.txt").unwrap();
     file.write_all(message.as_bytes()).unwrap();
-}
-
-fn usage() -> ! {
-    let prg = env::args().next().unwrap();
-    eprintln!("usage: {} <INPUT_FILE>", prg);
-    std::process::exit(1);
 }
 
 #[derive(Debug)]
@@ -88,13 +124,14 @@ impl GoertzelFilter {
     }
 
     fn process(&mut self, samples: &[i16]) {
-        for i in 0..self.n {
-            let q0 = self.coeff * self.q1 - self.q2 + samples[i] as f64;
+        for v in samples {
+            let q0 = self.coeff * self.q1 - self.q2 + f64::from(*v);
             self.q2 = self.q1;
             self.q1 = q0;
         }
     }
 
+    #[allow(unused)]
     fn get_real_imag(&self) -> (f64, f64) {
         let real = self.q1 - self.q2 * self.cos;
         let imag = self.q2 * self.sin;
