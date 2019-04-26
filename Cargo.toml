@@ -1,0 +1,8 @@
+[package]
+name = "hw1_dem"
+version = "0.1.0"
+authors = ["Luke Petherbridge <luc6@pdx.edu>"]
+edition = "2018"
+
+[dependencies]
+hound = "3.4.0"
